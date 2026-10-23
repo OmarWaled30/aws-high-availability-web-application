@@ -141,5 +141,103 @@ The NAT Gateway provides outbound IPv4 connectivity for EC2 instances in private
 
 **Note:** This lab uses one NAT Gateway in `eu-north-1a` for both private subnets. For production-level availability, consider
 
+## 3. Configure AWS Security Groups
+
+Security Groups act as stateful virtual firewalls that control inbound and outbound network traffic for AWS resources.
+
+This project uses four dedicated Security Groups to separate public access, application traffic, administrative access, and database connectivity.
+
+### Step 1 — Create the Bastion Host Security Group
+
+Navigate to **EC2 → Security Groups → Create security group**.
+
+Configure:
+
+- Name: `HA-Bastion-SG`
+- VPC: `HA-WebApp-VPC`
+- Description: Restrict SSH access to the Bastion Host
+
+**Inbound rule:**
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| SSH | TCP | 22 | Administrator's public IP `/32` |
+
+Do not permit SSH from `0.0.0.0/0`.
+
+### Step 2 — Create the NLB Security Group
+
+Create:
+
+`HA-NLB-SG`
+
+**Inbound rule:**
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| HTTP | TCP | 80 | `0.0.0.0/0` |
+
+This permits public HTTP access through the Network Load Balancer.
+
+### Step 3 — Create the Application Security Group
+
+Create:
+
+`HA-App-SG`
+
+**Inbound rules:**
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| Custom TCP | TCP | 8002 | `HA-NLB-SG` |
+| SSH | TCP | 22 | `HA-Bastion-SG` |
+
+Application traffic is restricted to the Network Load Balancer, and administrative SSH traffic is restricted to the Bastion Host.
+
+Do not open all TCP ports or allow application port 8002 from the entire internet.
+
+### Step 4 — Create the Database Security Group
+
+Create:
+
+`HA-DB-SG`
+
+**Inbound rules:**
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| PostgreSQL | TCP | 5432 | `HA-App-SG` |
+| SSH | TCP | 22 | `HA-Bastion-SG` |
+
+This permits PostgreSQL traffic only from EC2 instances associated with the Application Security Group.
+
+The database servers are deployed in private subnets and have no public IPv4 addresses.
+
+### Step 5 — Verify the Security Groups
+
+Using AWS CLI:
+
+```bash
+aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=HA-Bastion-SG,HA-NLB-SG,HA-App-SG,HA-DB-SG" \
+  --region eu-north-1 \
+  --query "SecurityGroups[*].{Name:GroupName,Inbound:IpPermissions}" \
+  --output json
+```
+
+Verify that each security group permits only its intended inbound traffic.
+
+### Security Considerations
+
+- Security Groups are stateful, allowing response traffic for permitted connections.
+- Referencing Security Groups instead of changing EC2 private IPs supports Auto Scaling.
+- Public SSH access is restricted to the administrator's IP.
+- The Bastion Host provides controlled administrative access.
+- PostgreSQL is not directly exposed to the public internet.
+- Security Group egress rules should also be reviewed according to the application's requirements.
+
+**Note:** Application instances in this project are deployed in public subnets and have public IPv4 addresses. For a more production-oriented design, application instances could be moved to private subnets.
+
+
 
 
