@@ -358,6 +358,181 @@ For production environments, AWS Systems Manager Session Manager is another opti
 SSH connectivity was successfully tested from the Bastion Host to both application instances and both private PostgreSQL servers.
 
 The Bastion Host enables controlled administrative access while the database tier remains without public IPv4 addresses.
+
+## 5. Create the EC2 Launch Template and Deploy the Application
+
+### Overview
+
+The application tier uses an EC2 Launch Template to standardize application instance configuration.
+
+EC2 User Data automates the initial setup of each new instance by installing Python, creating the application files, configuring a systemd service, and starting the application.
+
+This is essential for EC2 Auto Scaling because newly launched instances must become functional without manual SSH configuration.
+
+### Step 1 — Create the Launch Template
+
+Navigate to **AWS Console → EC2 → Launch Templates → Create launch template**.
+
+Configure:
+
+| Setting | Configuration |
+|---|---|
+| Launch Template name | `HA-App-LaunchTemplate` |
+| AMI | Ubuntu Server (tested with Ubuntu 26.04) |
+| Instance type | Small EC2 instance appropriate for the lab |
+| Key pair | `HA-WebApp-Key` |
+| Security Group | `HA-App-SG` |
+| User Data | Bootstrap script from the repository |
+
+Leave subnet selection to the Auto Scaling Group so instances can be launched across both Availability Zones.
+
+### Step 2 — Configure User Data
+
+Under **Advanced details → User data**, paste the contents of:
+
+`scripts/app-user-data.sh`
+
+The script performs the following actions:
+
+1. Updates Ubuntu package metadata.
+2. Installs Python 3.
+3. Creates `/opt/ha-webapp`.
+4. Creates the Python HTTP application.
+5. Creates the `ha-webapp.service` systemd unit.
+6. Enables and starts the application service.
+7. Verifies that the service is active.
+
+**Important:** The script must begin with `#!/bin/bash` as its first characters, without a blank line or UTF-8 BOM before the shebang.
+
+The project originally encountered a bootstrapping error caused by a blank line before the shebang. Correcting the script and updating the Launch Template resolved this issue.
+
+### Step 3 — Understand the Application
+
+The application source code is available at:
+
+`app/server.py`
+
+It uses Python's built-in `ThreadingHTTPServer` and listens on:
+
+`0.0.0.0:8002`
+
+Each HTTP response includes:
+
+- EC2 hostname.
+- Server timestamp.
+- Request counter.
+- Unique request ID.
+- Client IP address.
+- Requested path.
+
+The response helps identify which EC2 instance handled a request.
+
+### Step 4 — Configure systemd
+
+The systemd unit is provided in:
+
+`systemd/ha-webapp.service`
+
+It uses the following configuration:
+
+```ini
+[Unit]
+Description=HA Web App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ha-webapp
+ExecStart=/usr/bin/python3 -u /opt/ha-webapp/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The service starts automatically during boot and is restarted if the application process exits.
+
+### Step 5 — Verify Application Deployment
+
+After launching a test application instance from the Launch Template, connect through the Bastion Host.
+
+Check the service:
+
+```bash
+sudo systemctl is-active ha-webapp
+```
+
+Expected:
+
+```text
+active
+```
+
+Check the listening port:
+
+```bash
+sudo ss -lntp | grep 8002
+```
+
+Test the application locally:
+
+```bash
+curl http://localhost:8002
+```
+
+A successful response includes:
+
+```text
+AWS High Availability Web Application
+Hostname: ...
+Port: 8002
+Message: Hello from EC2!
+```
+
+### Step 6 — Troubleshoot Bootstrapping
+
+If the application isn't running, inspect the service and cloud-init logs:
+
+```bash
+sudo systemctl status ha-webapp
+```
+
+```bash
+sudo journalctl -u ha-webapp --no-pager -n 50
+```
+
+```bash
+sudo tail -n 100 /var/log/cloud-init-output.log
+```
+
+Verify that the User Data script was executed successfully.
+
+For this project, the corrected working configuration was saved as **Launch Template version 2**.
+
+### Step 7 — Verify the Launch Template Using AWS CLI
+
+```bash
+aws ec2 describe-launch-templates \
+  --launch-template-names HA-App-LaunchTemplate \
+  --region eu-north-1 \
+  --query "LaunchTemplates[*].{Name:LaunchTemplateName,DefaultVersion:DefaultVersionNumber,LatestVersion:LatestVersionNumber}" \
+  --output table
+```
+
+The verified deployment used version `2` as both the default and latest version.
+
+### Deployment Notes
+
+- User Data executes during the EC2 instance's initial initialization under the normal cloud-init configuration.
+- New Auto Scaling instances receive the application configuration automatically.
+- The application doesn't require external Python packages.
+- The current Python web application is a demonstration HTTP service and doesn't yet query PostgreSQL.
+- Instance bootstrap should be tested after any Launch Template changes before being used for production scaling.
+
+**Verification result:** Automatic application initialization was successfully tested on newly launched EC2 instances.
 **Note:** Application instances in this project are deployed in public subnets and have public IPv4 addresses. For a more production-oriented design, application instances could be moved to private subnets.
 
 
