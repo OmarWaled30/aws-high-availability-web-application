@@ -1241,3 +1241,250 @@ All four tests successfully authenticated and executed a SELECT query, returning
 
 **Verification Result:** PostgreSQL services, local SQL access, private TCP connectivity, authentication, and all four application-to-database SQL connections were successfully tested.
 
+## 9. Configure Amazon CloudWatch Monitoring and Alarms
+
+### Overview
+
+Amazon CloudWatch was used to monitor application performance, infrastructure health, Network Load Balancer traffic, database EC2 instances, and Auto Scaling activity.
+
+A custom dashboard named `HA-WebApp-Monitoring` was created to visualize the performance and availability of the infrastructure.
+
+CloudWatch also provided the metrics and alarms used to verify CPU-based Auto Scaling.
+
+### Step 1 — Create the CloudWatch Dashboard
+
+Navigate to:
+
+**AWS Console → CloudWatch → Dashboards → Create dashboard**
+
+Configure:
+
+- Dashboard name: `HA-WebApp-Monitoring`
+- Region: `eu-north-1`
+
+Create the dashboard and add monitoring widgets using the **Add widget** option.
+
+### Step 2 — Monitor Application EC2 CPU Utilization
+
+Add a line graph for:
+
+| Setting | Value |
+|---|---|
+| Namespace | `AWS/EC2` |
+| Metric | `CPUUtilization` |
+| Resource | Application EC2 instances |
+| Statistic | Average |
+| Period | 1 or 5 minutes, according to monitoring configuration |
+
+This widget was used to observe the CPU increase during `stress-ng` load testing.
+
+**Note:** EC2 instance IDs change when Auto Scaling replaces instances. Per-instance monitoring widgets should be reviewed after instance replacement.
+
+### Step 3 — Monitor Auto Scaling Group CPU Utilization
+
+Add another line widget.
+
+Navigate to:
+
+**Metrics → EC2 → By Auto Scaling Group**
+
+Select:
+
+- Auto Scaling Group: `HA-WebApp-ASG`
+- Metric: `CPUUtilization`
+- Statistic: Average
+
+Name the widget:
+
+`ASG — Average CPU Utilization`
+
+This graph follows the average CPU utilization of instances associated with the Auto Scaling Group.
+
+During the load test, CPU utilization increased to approximately 80%, triggering dynamic scale-out.
+
+After the workload stopped, CPU utilization dropped to approximately 0.16%, allowing automatic scale-in after the required alarm evaluation.
+
+### Step 4 — Monitor Auto Scaling Capacity
+
+Enable Auto Scaling Group metrics collection if necessary.
+
+Navigate to:
+
+**EC2 → Auto Scaling Groups → HA-WebApp-ASG → Monitoring**
+
+Enable group metrics collection.
+
+Add a CloudWatch line widget containing:
+
+| Metric | Purpose |
+|---|---|
+| `GroupDesiredCapacity` | Desired number of EC2 instances |
+| `GroupInServiceInstances` | Instances currently InService |
+| `GroupTotalInstances` | Total instances associated with the ASG |
+
+Ensure all three metrics belong to `HA-WebApp-ASG`, not another Auto Scaling Group.
+
+Name the widget:
+
+`Auto Scaling — Capacity Monitoring`
+
+This widget was used to visualize the scaling sequence:
+
+**2 → 4 → 3 → 2 EC2 instances**
+
+### Step 5 — Monitor Network Load Balancer Metrics
+
+Add graphs from the `AWS/NetworkELB` namespace.
+
+The project dashboard includes:
+
+| Metric | Purpose |
+|---|---|
+| `NewFlowCount` | Number of new network flows |
+| `ActiveFlowCount` | Active network flows |
+| `ProcessedBytes` | Amount of traffic processed |
+| `HealthyHostCount` | Number of healthy application targets |
+| `UnHealthyHostCount` | Number of unhealthy application targets |
+
+These metrics help track load-balancer traffic and application target health.
+
+During testing, the number of healthy targets increased as new Auto Scaling instances were registered.
+
+A controlled application failure test also demonstrated how target health metrics change when an application service becomes unavailable.
+
+### Step 6 — Monitor Database EC2 Instances
+
+Add CloudWatch metrics for both PostgreSQL EC2 servers.
+
+Monitor:
+
+- `CPUUtilization`
+- `NetworkIn`
+- `NetworkOut`
+- `StatusCheckFailed`
+
+These metrics provide visibility into the EC2 infrastructure hosting PostgreSQL.
+
+They do not replace PostgreSQL-specific monitoring of database connections, query latency, transaction activity, replication, or database errors.
+
+### Step 7 — Monitor the Bastion Host
+
+Add EC2 monitoring widgets for `HA-Bastion-Host`.
+
+Monitor:
+
+- CPU utilization
+- Network traffic in
+- Network traffic out
+- EC2 status checks
+
+This provides basic infrastructure visibility for the administrative access instance.
+
+### Step 8 — Configure Application CPU Alarms
+
+Two EC2 CPU utilization alarms were originally created:
+
+- `HA-App-HighCPU-Alarm`
+- `HA-App2-HighCPU-Alarm`
+
+Their initial configuration included:
+
+| Setting | Value |
+|---|---|
+| Metric | CPUUtilization |
+| Threshold | Greater than 70% |
+| Evaluation | 2 periods |
+| Period duration | 5 minutes |
+
+These were used for monitoring the initial application instances.
+
+**Important:** Because Auto Scaling can terminate and replace EC2 instances, alarms tied to specific instance IDs can become outdated. These alarms should be reviewed or replaced with lifecycle-aware monitoring for continued use.
+
+### Step 9 — Understand Auto Scaling Target-Tracking Alarms
+
+A target-tracking policy called `Target Tracking Policy` was configured for `HA-WebApp-ASG`.
+
+Its settings included:
+
+- Metric: `ASGAverageCPUUtilization`
+- Target value: `50%`
+- Scale-in: Enabled
+
+AWS automatically created and managed the target-tracking CloudWatch alarms.
+
+These included alarms with names containing:
+
+- `TargetTracking-HA-WebApp-ASG-AlarmHigh`
+- `TargetTracking-HA-WebApp-ASG-AlarmLow`
+
+The high-CPU alarm initiated scale-out from 2 to 4 instances.
+
+The low-CPU alarm initiated scale-in after CPU demand decreased.
+
+Do not manually edit AWS-managed target-tracking alarms; update the Auto Scaling policy when scaling behavior needs to change.
+
+### Step 10 — Verify Scaling Activity
+
+Navigate to:
+
+**EC2 → Auto Scaling Groups → HA-WebApp-ASG → Activity history**
+
+Inspect successful instance launches and terminations.
+
+The verified project recorded:
+
+| Event | Result |
+|---|---|
+| High CPU detected | Desired capacity increased 2 → 4 |
+| New EC2 instances launched | Successful |
+| Additional NLB targets registered | Healthy |
+| CPU utilization decreased | Approximately 0.16% |
+| Low-CPU alarm triggered | Scale-in initiated |
+| Desired capacity reduced | 4 → 3 → 2 |
+| Final baseline | Two healthy application instances |
+
+The scaling activity history provides evidence that the changes were triggered by the target-tracking policy rather than manual capacity updates.
+
+### Step 11 — Verify Dashboard Configuration Using AWS CLI
+
+Retrieve the dashboard definition:
+
+```bash
+aws cloudwatch get-dashboard \
+  --dashboard-name HA-WebApp-Monitoring \
+  --region eu-north-1 \
+  --query "DashboardBody" \
+  --output text
+```
+
+The output contains the dashboard configuration in JSON format.
+
+Before sharing dashboard definitions publicly, review them for account identifiers, infrastructure details, and other information that should not be disclosed.
+
+### Step 12 — Capture Monitoring Evidence
+
+Save screenshots of:
+
+1. Application CPU utilization during the load test.
+2. Auto Scaling CPU utilization.
+3. Auto Scaling capacity changes from 2 → 4 → 2.
+4. NLB healthy and unhealthy targets.
+5. CloudWatch alarm states.
+6. Auto Scaling activity history.
+
+These screenshots can be included in the GitHub repository's `screenshots/` directory.
+
+### Monitoring Limitations
+
+- Standard EC2 metrics do not provide detailed application request tracing.
+- The project does not currently collect PostgreSQL-specific operational metrics.
+- The two PostgreSQL servers do not have automated database replication.
+- CloudWatch metrics may appear after a delay depending on their publication period.
+- Instance-specific widgets and alarms may require updates when Auto Scaling replaces EC2 instances.
+- Additional monitoring, such as detailed EC2 metrics and custom CloudWatch metrics, can incur AWS charges.
+
+### Verification Result
+
+Amazon CloudWatch successfully captured infrastructure metrics, application CPU utilization, NLB traffic, target health, and Auto Scaling capacity changes.
+
+The dashboard provided visual evidence of CPU-based scale-out and automatic scale-in during the controlled AWS experiments.
