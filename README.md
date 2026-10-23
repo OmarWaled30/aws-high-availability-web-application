@@ -24,6 +24,31 @@ Two PostgreSQL database servers are deployed in private subnets, with database c
 - Monitor infrastructure using Amazon CloudWatch.
 - Validate availability and performance through load and failure testing.
 
+## Project Documentation
+
+Explore the implementation, deployment process, and testing evidence:
+
+| Resource | Description |
+|---|---|
+| [Deployment Guide](docs/deployment-guide.md) | Step-by-step AWS infrastructure deployment using Console and CLI |
+| [Testing Results](docs/testing-results.md) | k6 load testing, failover, Auto Scaling, and database connectivity results |
+| [Python Application](app/server.py) | HTTP application deployed on the EC2 servers |
+| [EC2 Bootstrap Script](scripts/app-user-data.sh) | Launch Template User Data for automatic application deployment |
+| [systemd Service](systemd/ha-webapp.service) | Linux service configuration for automatic startup and restart |
+| [Project Screenshots](Screenshots/) | AWS infrastructure, monitoring, and scaling evidence |
+
+### Key Project Results
+
+| Test | Verified result |
+|---|---|
+| CPU-Based Auto Scaling | **2 → 4 → 2 EC2 instances** |
+| Application Failover Test | **0 HTTP failures across 818 requests** |
+| NLB Availability During Scale-In | **10/10 HTTP 200 responses** |
+| PostgreSQL Connectivity | **4/4 authenticated connections passed** |
+| Multi-AZ Application Deployment | **2 Availability Zones** |
+
+The project uses AWS Console, AWS CLI, Python, PostgreSQL, and Linux. No Terraform or CI/CD pipeline is required for this implementation.
+
 ## 2. Architecture
 
 **AWS Region:** `eu-north-1` (Stockholm)
