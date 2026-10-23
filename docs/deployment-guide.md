@@ -236,6 +236,128 @@ Verify that each security group permits only its intended inbound traffic.
 - PostgreSQL is not directly exposed to the public internet.
 - Security Group egress rules should also be reviewed according to the application's requirements.
 
+## 4. Deploy and Configure the Bastion Host
+
+### Overview
+
+A Bastion Host provides a controlled entry point for administrative SSH access to EC2 instances within the VPC.
+
+In this project, the Bastion Host is deployed in a public subnet and is used to access both application servers and private PostgreSQL database servers.
+
+### Step 1 — Launch the Bastion Host
+
+Navigate to **AWS Console → EC2 → Instances → Launch instance**.
+
+Configure:
+
+| Setting | Configuration |
+|---|---|
+| Instance name | `HA-Bastion-Host` |
+| Operating system | Ubuntu Server |
+| VPC | `HA-WebApp-VPC` |
+| Subnet | `HA-Public-1a` |
+| Public IPv4 address | Enabled |
+| Security Group | `HA-Bastion-SG` |
+| Key pair | `HA-WebApp-Key` |
+
+Choose an appropriate instance type for the lab.
+
+Ensure the Bastion Host has SSH access only from the administrator's authorized public IP address.
+
+### Step 2 — Connect Using PuTTY
+
+On Windows:
+
+1. Open PuTTY.
+2. Enter the Bastion Host's public IPv4 address.
+3. Set the connection type to SSH and the port to `22`.
+4. Configure the appropriate SSH private key or SSH agent.
+5. Connect using the username `ubuntu`.
+
+Example:
+
+```text
+ubuntu@BASTION_PUBLIC_IP
+```
+
+Accept the SSH host key only after verifying its fingerprint through a trusted source.
+
+### Step 3 — Connect to an Application Instance
+
+From the Bastion Host, connect using the application's private IP address:
+
+```bash
+ssh ubuntu@APP_PRIVATE_IP
+```
+
+Example from the verified deployment:
+
+```bash
+ssh ubuntu@10.0.1.142
+```
+
+The application instance's Security Group must allow SSH from `HA-Bastion-SG`.
+
+Auto Scaling can replace application instances, so their private IP addresses should be discovered from EC2 or Auto Scaling before connecting.
+
+### Step 4 — Connect to the Private Database Servers
+
+Both database servers are deployed in private subnets without public IPv4 addresses.
+
+From the Bastion Host, connect to DB Server 1:
+
+```bash
+ssh ubuntu@10.0.11.50
+```
+
+Connect to DB Server 2:
+
+```bash
+ssh ubuntu@10.0.12.68
+```
+
+The database Security Group allows SSH connections from the Bastion Security Group.
+
+### Step 5 — Verify SSH Connectivity
+
+On each destination instance, run:
+
+```bash
+hostname
+```
+
+Then:
+
+```bash
+ip -4 addr show
+```
+
+Confirm that the hostname and private IPv4 address match the intended EC2 instance.
+
+To exit a private instance and return to the Bastion Host:
+
+```bash
+exit
+```
+
+Run `exit` again to disconnect from the Bastion Host.
+
+### Security Best Practices
+
+- Restrict Bastion SSH ingress to a trusted administrator IP.
+- Use SSH keys instead of password authentication.
+- Never commit private SSH keys to GitHub.
+- Verify SSH host fingerprints before trusting new hosts.
+- Avoid copying private keys unnecessarily onto the Bastion Host; use an approved SSH agent or controlled jump-host configuration.
+- Review administrative access regularly.
+
+For production environments, AWS Systems Manager Session Manager is another option for administrative access without relying on a publicly accessible SSH Bastion Host.
+
+### Verification Result
+
+SSH connectivity was successfully tested from the Bastion Host to both application instances and both private PostgreSQL servers.
+
+The Bastion Host enables controlled administrative access while the database tier remains without public IPv4 addresses.
 **Note:** Application instances in this project are deployed in public subnets and have public IPv4 addresses. For a more production-oriented design, application instances could be moved to private subnets.
 
 
