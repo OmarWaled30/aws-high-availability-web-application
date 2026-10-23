@@ -33,13 +33,64 @@ This guide documents the manual deployment of a highly available web application
 
 ## Deployment Sequence
 
-1. Create the VPC and subnets.
-2. Configure the Internet Gateway, NAT Gateway, and route tables.
-3. Create the Security Groups.
-4. Launch and configure the Bastion Host.
-5. Create the EC2 Launch Template using the bootstrap script.
-6. Deploy the application using EC2 Auto Scaling.
-7. Configure the Network Load Balancer and Target Group.
-8. Deploy and configure the PostgreSQL database servers.
-9. Configure CloudWatch monitoring.
-10. Validate application availability, scaling, and database connectivity.
+
+## 1. Create the VPC and Subnets
+
+### Step 1 — Create the VPC
+
+Open **AWS Console → VPC → Your VPCs → Create VPC**.
+
+Configure:
+
+- Name: `HA-WebApp-VPC`
+- IPv4 CIDR: `10.0.0.0/16`
+- Region: `eu-north-1`
+- Tenancy: Default
+
+### Step 2 — Create the Subnets
+
+Navigate to **VPC → Subnets → Create subnet**.
+
+Create four subnets:
+
+| Subnet | CIDR | Availability Zone | Type |
+|---|---|---|---|
+| HA-Public-1a | 10.0.1.0/24 | eu-north-1a | Public |
+| HA-Public-2b | 10.0.2.0/24 | eu-north-1b | Public |
+| HA-Private-1a | 10.0.11.0/24 | eu-north-1a | Private |
+| HA-Private-2b | 10.0.12.0/24 | eu-north-1b | Private |
+
+### Step 3 — Configure Public IPv4 Assignment
+
+For both public subnets:
+
+1. Select the subnet.
+2. Choose **Actions → Edit subnet settings**.
+3. Enable **Auto-assign public IPv4 address**.
+4. Save changes.
+
+For both private subnets, leave automatic public IPv4 assignment disabled.
+
+**Important:** A subnet becomes public when its effective route table contains a route to an Internet Gateway. Automatic public IP assignment alone does not make a subnet public.
+
+### Step 4 — Verify the Subnets Using AWS CLI
+
+```bash
+aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=HA-Public-1a,HA-Public-2b,HA-Private-1a,HA-Private-2b" \
+  --region eu-north-1 \
+  --query "Subnets[*].[Tags[?Key=='Name']|[0].Value,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]" \
+  --output table
+```
+
+Expected:
+
+- Four subnets in the same VPC.
+- Two subnets in `eu-north-1a`.
+- Two subnets in `eu-north-1b`.
+- Public IPv4 assignment enabled only for public subnets.
+
+The next section will configure the Internet Gateway, NAT Gateway, and route tables.
+
+
+
