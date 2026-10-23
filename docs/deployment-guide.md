@@ -534,6 +534,176 @@ The verified deployment used version `2` as both the default and latest version.
 
 **Verification result:** Automatic application initialization was successfully tested on newly launched EC2 instances.
 **Note:** Application instances in this project are deployed in public subnets and have public IPv4 addresses. For a more production-oriented design, application instances could be moved to private subnets.
+## 6. Configure the Network Load Balancer and Target Group
+
+### Overview
+
+The Network Load Balancer (NLB) provides a single public endpoint for the application and distributes incoming TCP connections across healthy EC2 instances.
+
+The application listens on port `8002`, while the NLB accepts incoming client traffic on port `80`.
+
+The infrastructure uses:
+
+- Load Balancer: `HA-WebApp-NLB`
+- Target Group: `HA-App-TG`
+- Listener: TCP port `80`
+- Target protocol: TCP port `8002`
+- Health check: HTTP `/`
+- Target type: EC2 Instance
+
+### Step 1 — Create the Target Group
+
+Navigate to **AWS Console → EC2 → Target Groups → Create target group**.
+
+Configure:
+
+| Setting | Configuration |
+|---|---|
+| Target type | Instances |
+| Target group name | `HA-App-TG` |
+| Protocol | TCP |
+| Port | `8002` |
+| VPC | `HA-WebApp-VPC` |
+| Health check protocol | HTTP |
+| Health check path | `/` |
+| Health check port | Traffic port |
+
+Set the health check thresholds:
+
+| Setting | Value |
+|---|---|
+| Healthy threshold | 5 |
+| Unhealthy threshold | 2 |
+
+Create the target group.
+
+For an Auto Scaling deployment, configure the ASG to manage target registration rather than relying on manually registered instances.
+
+### Step 2 — Create the Network Load Balancer
+
+Navigate to **EC2 → Load Balancers → Create load balancer**.
+
+Select **Network Load Balancer**.
+
+Configure:
+
+| Setting | Configuration |
+|---|---|
+| Name | `HA-WebApp-NLB` |
+| Scheme | Internet-facing |
+| IP address type | IPv4 |
+| VPC | `HA-WebApp-VPC` |
+| Availability Zones | `eu-north-1a`, `eu-north-1b` |
+| Subnets | `HA-Public-1a`, `HA-Public-2b` |
+| Security Group | `HA-NLB-SG` |
+
+Create a listener:
+
+| Listener setting | Value |
+|---|---|
+| Protocol | TCP |
+| Port | `80` |
+| Default action | Forward to `HA-App-TG` |
+
+Create the load balancer.
+
+### Step 3 — Configure Application Security
+
+Ensure `HA-App-SG` permits:
+
+| Protocol | Port | Source |
+|---|---|---|
+| TCP | 8002 | `HA-NLB-SG` |
+
+This allows the NLB to reach the application instances.
+
+The application instances must run the `ha-webapp` service and accept TCP connections on port `8002`.
+
+### Step 4 — Integrate the Target Group with Auto Scaling
+
+After creating `HA-WebApp-ASG`, open:
+
+**EC2 → Auto Scaling Groups → HA-WebApp-ASG → Integrations → Load balancing → Edit**
+
+Attach the existing target group:
+
+`HA-App-TG`
+
+Save the configuration.
+
+This enables automatically launched ASG instances to register with the target group and terminating instances to deregister.
+
+**Troubleshooting note:** During the project, an instance was initially replaced successfully by Auto Scaling but wasn't automatically registered with the NLB target group. Attaching `HA-App-TG` to the Auto Scaling Group resolved the issue.
+
+### Step 5 — Verify Target Health Using AWS CLI
+
+Retrieve the target group ARN:
+
+```bash
+aws elbv2 describe-target-groups \
+  --names HA-App-TG \
+  --region eu-north-1 \
+  --query "TargetGroups[0].TargetGroupArn" \
+  --output text
+```
+
+Then inspect registered targets:
+
+```bash
+aws elbv2 describe-target-health \
+  --target-group-arn YOUR_TARGET_GROUP_ARN \
+  --region eu-north-1 \
+  --query "TargetHealthDescriptions[*].{Instance:Target.Id,Port:Target.Port,State:TargetHealth.State}" \
+  --output table
+```
+
+At baseline, the expected configuration contains two healthy EC2 targets on port `8002`.
+
+During CPU-based scale-out, the number of healthy targets can increase as new instances are launched and pass health checks.
+
+### Step 6 — Test the Public Application Endpoint
+
+Copy the DNS name from:
+
+**EC2 → Load Balancers → HA-WebApp-NLB → Details**
+
+Run:
+
+```bash
+curl -i http://YOUR_NLB_DNS/
+```
+
+Expected:
+
+```text
+HTTP/1.1 200 OK
+
+AWS High Availability Web Application
+Hostname: ...
+Port: 8002
+Message: Hello from EC2!
+```
+
+Repeat the request to observe application responses while checking target health.
+
+### Step 7 — Verify Load Balancer Availability
+
+During the project, load testing and controlled failure experiments were performed to validate application availability.
+
+In a separate scale-in availability check, 10 consecutive HTTP requests through the NLB returned status `200`.
+
+This result demonstrates successful availability during the tested interval, but it doesn't guarantee zero downtime in all conditions.
+
+### Important Notes
+
+- The NLB operates at Layer 4 and forwards TCP connections to the application.
+- The HTTP health check verifies that the application responds successfully on `/`.
+- The target group's deregistration delay permits existing connections to drain during scale-in.
+- EC2 Auto Scaling must be associated with the target group for automatic target registration.
+- The public endpoint currently uses HTTP rather than HTTPS/TLS.
+- A Network Load Balancer can distribute connections between targets, but individual requests over a persistent TCP connection may continue using the same target.
+
+**Verification Result:** The NLB successfully distributed application traffic, detected application target health, and maintained service availability during the tested scaling and failover scenarios.
 
 
 
