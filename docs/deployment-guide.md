@@ -908,4 +908,336 @@ During implementation, several issues were identified and resolved:
 
 **Important:** These tests verify application-tier Auto Scaling and availability behavior. The PostgreSQL servers are independent and do not provide automatic database replication or failover.
 
+## 8. Deploy and Configure Private PostgreSQL Database Servers
+
+### Overview
+
+This project uses two PostgreSQL 16 database servers deployed on Amazon EC2 in separate private subnets.
+
+Both databases are independently managed and are accessible from the application EC2 instances through the VPC's internal network.
+
+**Important:** These servers do not use PostgreSQL replication or automatic database failover. The two databases are independent.
+
+### Step 1 — Launch the Database EC2 Instances
+
+Navigate to **AWS Console → EC2 → Instances → Launch instance**.
+
+Configure the database instances as follows:
+
+| Setting | Database Server 1 | Database Server 2 |
+|---|---|---|
+| Name | `HA-DB-Server-1` | `HA-DB-Server-2` |
+| OS | Ubuntu Server 24.04 LTS | Ubuntu Server 24.04 LTS |
+| Availability Zone | eu-north-1a | eu-north-1b |
+| Subnet | HA-Private-1a | HA-Private-2b |
+| Private IP (verified deployment) | 10.0.11.50 | 10.0.12.68 |
+| Public IPv4 address | None | None |
+| Security Group | HA-DB-SG | HA-DB-SG |
+| SSH key pair | HA-WebApp-Key | HA-WebApp-Key |
+
+For a new deployment, private IP addresses may differ.
+
+### Step 2 — Connect Through the Bastion Host
+
+Connect to the Bastion Host using SSH.
+
+From the Bastion Host, connect to each database server using its private IP:
+
+```bash
+ssh ubuntu@10.0.11.50
+```
+
+Or:
+
+```bash
+ssh ubuntu@10.0.12.68
+```
+
+### Step 3 — Install PostgreSQL
+
+On both database servers, install PostgreSQL 16 from an appropriate package repository:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y postgresql-16
+```
+
+Verify installation:
+
+```bash
+sudo systemctl is-active postgresql
+```
+
+Check database readiness:
+
+```bash
+sudo -u postgres pg_isready
+```
+
+Expected results:
+
+```text
+active
+/var/run/postgresql:5432 - accepting connections
+```
+
+### Step 4 — Create the Sample Database
+
+On each database server, open PostgreSQL:
+
+```bash
+sudo -u postgres psql
+```
+
+Create the database:
+
+```sql
+CREATE DATABASE ha_project;
+```
+
+Connect to it:
+
+```sql
+\c ha_project
+```
+
+Create a sample table for testing:
+
+```sql
+CREATE TABLE demo_records (
+    id SERIAL PRIMARY KEY,
+    message TEXT NOT NULL
+);
+```
+
+Insert a sample record:
+
+```sql
+INSERT INTO demo_records (message)
+VALUES ('Hello from PostgreSQL');
+```
+
+Verify:
+
+```sql
+SELECT COUNT(*) FROM demo_records;
+```
+
+Exit:
+
+```sql
+\q
+```
+
+The verified project contained one record in `demo_records` on each database server. The sample schema shown here is an illustrative reproducible configuration; the original table definition was not independently captured.
+
+### Step 5 — Configure PostgreSQL to Listen on Its Private IP
+
+During troubleshooting, PostgreSQL was found to be listening only on:
+
+`127.0.0.1:5432`
+
+This caused remote TCP connection attempts from application servers to fail with:
+
+`Connection refused`
+
+To enable private network access, configure PostgreSQL to listen on its private IP address.
+
+On DB Server 1:
+
+```bash
+sudo -u postgres psql -c \
+"ALTER SYSTEM SET listen_addresses = 'localhost,10.0.11.50';"
+```
+
+On DB Server 2:
+
+```bash
+sudo -u postgres psql -c \
+"ALTER SYSTEM SET listen_addresses = 'localhost,10.0.12.68';"
+```
+
+Restart PostgreSQL on each server:
+
+```bash
+sudo systemctl restart postgresql
+```
+
+Verify:
+
+```bash
+sudo ss -lntp | grep 5432
+```
+
+Expected: PostgreSQL listens on both `127.0.0.1:5432` and the server's private IPv4 address on port `5432`.
+
+### Step 6 — Create a Dedicated Application Database User
+
+On each database server:
+
+```bash
+sudo -u postgres psql
+```
+
+Create the login role:
+
+```sql
+CREATE ROLE ha_app_user WITH LOGIN;
+```
+
+Set a strong password interactively:
+
+```sql
+\password ha_app_user
+```
+
+Grant database access:
+
+```sql
+GRANT CONNECT ON DATABASE ha_project TO ha_app_user;
+```
+
+Connect to the database:
+
+```sql
+\c ha_project
+```
+
+Grant the permissions required for the sample read-only query:
+
+```sql
+GRANT USAGE ON SCHEMA public TO ha_app_user;
+GRANT SELECT ON TABLE public.demo_records TO ha_app_user;
+```
+
+Exit:
+
+```sql
+\q
+```
+
+Do not save the database password in the GitHub repository.
+
+### Step 7 — Configure PostgreSQL Client Authentication
+
+Back up the PostgreSQL authentication configuration:
+
+```bash
+sudo cp /etc/postgresql/16/main/pg_hba.conf \
+  /etc/postgresql/16/main/pg_hba.conf.bak
+```
+
+Edit the file:
+
+```bash
+sudo nano /etc/postgresql/16/main/pg_hba.conf
+```
+
+Add:
+
+```text
+host    ha_project    ha_app_user    10.0.1.0/24    scram-sha-256
+host    ha_project    ha_app_user    10.0.2.0/24    scram-sha-256
+```
+
+These rules allow authentication by `ha_app_user` from the two application subnet ranges.
+
+The AWS database Security Group separately restricts TCP 5432 ingress to EC2 instances using `HA-App-SG`.
+
+Reload PostgreSQL:
+
+```bash
+sudo systemctl reload postgresql
+```
+
+Check for configuration errors:
+
+```bash
+sudo -u postgres psql -c \
+"SELECT line_number, error FROM pg_hba_file_rules WHERE error IS NOT NULL;"
+```
+
+Expected:
+
+```text
+(0 rows)
+```
+
+### Step 8 — Verify TCP Connectivity from the Application Tier
+
+From an application EC2 instance, test TCP connectivity:
+
+```bash
+nc -zv -w 3 10.0.11.50 5432
+nc -zv -w 3 10.0.12.68 5432
+```
+
+Both connections should succeed.
+
+If `nc` is missing:
+
+```bash
+sudo apt-get install -y netcat-openbsd
+```
+
+### Step 9 — Test Authenticated PostgreSQL Queries
+
+Install the PostgreSQL client on application instances if needed:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y postgresql-client
+```
+
+Test DB Server 1:
+
+```bash
+psql -h 10.0.11.50 -p 5432 \
+  -U ha_app_user -d ha_project -W \
+  -c "SELECT COUNT(*) FROM public.demo_records;"
+```
+
+Test DB Server 2:
+
+```bash
+psql -h 10.0.12.68 -p 5432 \
+  -U ha_app_user -d ha_project -W \
+  -c "SELECT COUNT(*) FROM public.demo_records;"
+```
+
+Enter the appropriate database password when prompted.
+
+The same tests were executed successfully from both application EC2 instances.
+
+### Verified Connectivity Matrix
+
+| Application Source | DB Server 1 | DB Server 2 |
+|---|---|---|
+| App EC2 — eu-north-1a | Passed | Passed |
+| App EC2 — eu-north-1b | Passed | Passed |
+
+All four tests successfully authenticated and executed a SELECT query, returning one record.
+
+### Troubleshooting Lessons
+
+**Connection refused:** PostgreSQL was listening only on localhost. Configuring `listen_addresses` to include the private IP resolved the TCP connectivity failure.
+
+**Authentication not permitted:** PostgreSQL's `pg_hba.conf` initially allowed local connections only. Adding restricted host rules enabled authentication from the application subnets.
+
+**Password authentication failed:** An initial remote login failed due to an incorrect password entry. Retrying with the correct credentials succeeded.
+
+**Missing PostgreSQL client:** One application EC2 instance did not initially have a functional `psql` client. Installing `postgresql-client` resolved the problem.
+
+### Security and Architecture Limitations
+
+- Database EC2 instances have no public IPv4 addresses.
+- PostgreSQL inbound traffic is restricted by the database Security Group.
+- Application database permissions are limited to the sample read-only query.
+- PostgreSQL credentials should be managed securely.
+- PostgreSQL client connections in this lab were not explicitly configured to require TLS.
+- Client tools installed manually on Auto Scaling instances will not automatically persist when instances are replaced unless included in their launch configuration.
+- The Python HTTP application does not currently execute PostgreSQL queries.
+- The two PostgreSQL databases are independent, without replication or automated failover.
+
+**Verification Result:** PostgreSQL services, local SQL access, private TCP connectivity, authentication, and all four application-to-database SQL connections were successfully tested.
 
