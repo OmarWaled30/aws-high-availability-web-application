@@ -705,6 +705,207 @@ This result demonstrates successful availability during the tested interval, but
 
 **Verification Result:** The NLB successfully distributed application traffic, detected application target health, and maintained service availability during the tested scaling and failover scenarios.
 
+## 7. Configure EC2 Auto Scaling
 
+### Overview
+
+Amazon EC2 Auto Scaling automatically adjusts the number of application EC2 instances according to demand and replaces instances that become unhealthy.
+
+The Auto Scaling Group uses an EC2 Launch Template to deploy the Python application automatically across two Availability Zones.
+
+### Step 1 — Create the Auto Scaling Group
+
+Navigate to **AWS Console → EC2 → Auto Scaling Groups → Create Auto Scaling group**.
+
+Configure:
+
+| Setting | Configuration |
+|---|---|
+| Auto Scaling Group | `HA-WebApp-ASG` |
+| Launch Template | `HA-App-LaunchTemplate` |
+| Launch Template version | `2` |
+| VPC | `HA-WebApp-VPC` |
+| Subnet 1 | `HA-Public-1a` |
+| Subnet 2 | `HA-Public-2b` |
+| Minimum capacity | `2` |
+| Desired capacity | `2` |
+| Maximum capacity | `4` |
+
+The ASG spans two Availability Zones to improve application availability.
+
+**Deployment note:** During the original lab, two existing EC2 application instances were attached to the ASG. For a fresh deployment, the ASG can launch its initial instances automatically using the Launch Template.
+
+### Step 2 — Attach the NLB Target Group
+
+During ASG creation, under **Load balancing**, select:
+
+**Attach to an existing load balancer → Choose from your load balancer target groups**
+
+Select:
+
+`HA-App-TG`
+
+This allows new application instances to register automatically with the NLB and lets terminating instances deregister during scale-in.
+
+### Step 3 — Enable ELB Health Checks
+
+Navigate to:
+
+**EC2 → Auto Scaling Groups → HA-WebApp-ASG → Details → Health checks → Edit**
+
+Configure:
+
+| Setting | Value |
+|---|---|
+| Health check type | ELB |
+| Health check grace period | 300 seconds |
+
+ELB health checks allow the ASG to consider NLB target health in addition to EC2 health.
+
+### Step 4 — Configure Target Tracking
+
+Open:
+
+**HA-WebApp-ASG → Automatic scaling → Create dynamic scaling policy**
+
+Configure:
+
+| Setting | Value |
+|---|---|
+| Policy type | Target tracking |
+| Policy name | `Target Tracking Policy` |
+| Metric | Average CPU utilization |
+| Target value | `50%` |
+| Disable scale-in | False |
+| Instance warmup | Use the group's configured/default behavior |
+
+AWS automatically creates CloudWatch alarms for the target-tracking policy.
+
+**Note:** The verified ASG had no explicit default instance warmup and used a default cooldown of 300 seconds. The target-tracking policy did not specify a separate warmup value.
+
+### Step 5 — Verify the ASG Configuration
+
+Run:
+
+```bash
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names HA-WebApp-ASG \
+  --region eu-north-1 \
+  --query "AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Max:MaxSize,HealthCheck:HealthCheckType,Instances:Instances[*].{ID:InstanceId,State:LifecycleState,Health:HealthStatus}}" \
+  --output json
+```
+
+Expected baseline:
+
+- Minimum: 2
+- Desired: 2
+- Maximum: 4
+- Health check: ELB
+- Two instances in `InService` state
+- Both instances marked `Healthy`
+
+### Step 6 — Test Automatic Instance Replacement
+
+A controlled self-healing test was performed by terminating an ASG-managed EC2 instance.
+
+The Auto Scaling Group automatically launched a replacement instance.
+
+After confirming the target group integration, the replacement registered with `HA-App-TG` and became healthy.
+
+**Result:** Automatic instance replacement verified.
+
+### Step 7 — Test CPU-Based Scale-Out
+
+CPU stress was generated on both application EC2 instances using `stress-ng`.
+
+```bash
+sudo stress-ng --cpu 2 --cpu-load 80 --timeout 10m --metrics-brief
+```
+
+The command was executed on both original application instances.
+
+Observed CPU utilization increased to approximately 78–80%.
+
+The high-CPU target-tracking alarm triggered an increase in desired capacity:
+
+**2 → 4 instances**
+
+AWS successfully launched two additional application instances, and all four instances became healthy NLB targets.
+
+### Step 8 — Test Automatic Scale-In
+
+After `stress-ng` stopped, CPU utilization decreased to approximately 0.16%.
+
+The low-CPU target-tracking alarm entered the `ALARM` state.
+
+AWS automatically reduced desired capacity:
+
+**4 → 3 → 2 instances**
+
+Instances selected for termination entered the connection-draining process before being removed from the target group.
+
+No manual desired-capacity change was required.
+
+### Step 9 — Verify Application Availability During Scale-In
+
+Ten HTTP requests were sent through the NLB using Windows PowerShell:
+
+```powershell
+1..10 | ForEach-Object {
+    curl.exe -s -o NUL -w "%{http_code}`n" http://YOUR_NLB_DNS/
+    Start-Sleep -Seconds 2
+}
+```
+
+All ten requests returned HTTP status `200`.
+
+**Result:** Application availability was maintained throughout the observed request sample during scale-in.
+
+This test does not guarantee zero downtime under every workload or failure scenario.
+
+### Step 10 — Monitor Scaling Activities
+
+Navigate to:
+
+**EC2 → Auto Scaling Groups → HA-WebApp-ASG → Activity history**
+
+Inspect scaling activities to verify:
+
+- The scaling policy that triggered each action.
+- Desired-capacity changes.
+- EC2 instance launch and termination events.
+- Connection-draining status.
+- Successful completion of scaling operations.
+
+Enable Auto Scaling Group metrics collection when needed and monitor:
+
+- `GroupDesiredCapacity`
+- `GroupInServiceInstances`
+- `GroupTotalInstances`
+
+These metrics were added to the `HA-WebApp-Monitoring` CloudWatch dashboard.
+
+### Troubleshooting Lessons
+
+During implementation, several issues were identified and resolved:
+
+1. **Launch Template User Data failure:** A blank line before `#!/bin/bash` prevented correct execution. The script was corrected and saved in Launch Template version 2.
+2. **Missing NLB target registration:** The Auto Scaling Group was initially missing the target group association. Attaching `HA-App-TG` resolved the problem.
+3. **Insufficient CPU workload:** One CPU worker did not generate enough average CPU utilization to trigger scaling. Two workers on each two-vCPU instance produced sufficient CPU demand.
+4. **Delayed scale-in:** AWS required sustained low-CPU CloudWatch datapoints before triggering the low-CPU alarm. Connection draining added time to instance termination.
+5. **Health check configuration:** The ASG initially used EC2 health checks. ELB health checks were enabled afterward to include NLB target health.
+
+### Verified Results
+
+| Test | Result |
+|---|---|
+| Self-healing | Passed |
+| Automatic target registration | Passed |
+| CPU-based scale-out | 2 → 4 |
+| Automatic scale-in | 4 → 2 |
+| Final baseline | 2 healthy application instances |
+| NLB availability during scale-in | 10/10 HTTP 200 |
+
+**Important:** These tests verify application-tier Auto Scaling and availability behavior. The PostgreSQL servers are independent and do not provide automatic database replication or failover.
 
 
