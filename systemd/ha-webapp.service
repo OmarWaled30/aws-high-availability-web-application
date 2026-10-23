@@ -1,0 +1,16 @@
+
+[Unit]
+Description=HA Web App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ha-webapp
+ExecStart=/usr/bin/python3 -u /opt/ha-webapp/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
