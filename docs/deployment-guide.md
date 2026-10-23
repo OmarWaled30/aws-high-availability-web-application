@@ -90,7 +90,56 @@ Expected:
 - Two subnets in `eu-north-1b`.
 - Public IPv4 assignment enabled only for public subnets.
 
-The next section will configure the Internet Gateway, NAT Gateway, and route tables.
+## 2. Configure Internet Gateway, NAT Gateway, and Route Tables
+
+### Step 1 — Create and Attach an Internet Gateway
+
+Navigate to **AWS Console → VPC → Internet Gateways → Create internet gateway**.
+
+Configure:
+
+- Name: `HA-WebApp-IGW`
+- VPC: `HA-WebApp-VPC`
+
+After creating the Internet Gateway, select **Actions → Attach to VPC** and attach it to `HA-WebApp-VPC`.
+
+The Internet Gateway provides internet connectivity for resources in public subnets when appropriate routes and security settings are configured.
+
+### Step 2 — Create the Public Route Table
+
+Navigate to **VPC → Route Tables → Create route table**.
+
+Configure:
+
+- Name: `HA-Public-RT`
+- VPC: `HA-WebApp-VPC`
+
+Add the following routes:
+
+| Destination | Target |
+|---|---|
+| `10.0.0.0/16` | Local |
+| `0.0.0.0/0` | Internet Gateway (`HA-WebApp-IGW`) |
+
+Under **Subnet associations**, associate:
+
+- `HA-Public-1a`
+- `HA-Public-2b`
+
+### Step 3 — Create a Public NAT Gateway
+
+Navigate to **VPC → NAT Gateways → Create NAT gateway**.
+
+Configure:
+
+- Name: `HA-WebApp-NAT`
+- Subnet: `HA-Public-1a`
+- Connectivity type: Public
+- Elastic IP: Allocate and associate an Elastic IP address
+
+The NAT Gateway provides outbound IPv4 connectivity for EC2 instances in private subnets without allowing unsolicited inbound internet connections through the gateway.
+
+**Note:** This lab uses one NAT Gateway in `eu-north-1a` for both private subnets. For production-level availability, consider
 
 
 
