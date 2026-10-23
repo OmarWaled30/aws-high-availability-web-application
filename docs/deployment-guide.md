@@ -139,7 +139,41 @@ Configure:
 
 The NAT Gateway provides outbound IPv4 connectivity for EC2 instances in private subnets without allowing unsolicited inbound internet connections through the gateway.
 
-**Note:** This lab uses one NAT Gateway in `eu-north-1a` for both private subnets. For production-level availability, consider
+
+**Note:** This lab uses one NAT Gateway in `eu-north-1a` for both private subnets. For higher availability of private-subnet internet egress, consider deploying one NAT Gateway per Availability Zone with separate private route tables.
+
+### Step 4 — Create the Private Route Table
+
+Navigate to **VPC → Route Tables → Create route table**.
+
+Configure:
+
+- Name: `HA-Private-RT`
+- VPC: `HA-WebApp-VPC`
+
+Add the following routes:
+
+| Destination | Target |
+|---|---|
+| `10.0.0.0/16` | Local |
+| `0.0.0.0/0` | NAT Gateway (`HA-WebApp-NAT`) |
+
+Associate these two subnets:
+
+- `HA-Private-1a`
+- `HA-Private-2b`
+
+### Step 5 — Verify Route Tables
+
+```bash
+aws ec2 describe-route-tables \
+  --filters "Name=tag:Name,Values=HA-Public-RT,HA-Private-RT" \
+  --region eu-north-1 \
+  --output json
+```
+
+Verify that the public route table uses the Internet Gateway and the private route table uses the NAT Gateway.
+
 
 ## 3. Configure AWS Security Groups
 
