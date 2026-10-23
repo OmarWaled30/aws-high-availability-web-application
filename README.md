@@ -51,6 +51,8 @@ The project uses AWS Console, AWS CLI, Python, PostgreSQL, and Linux. No Terrafo
 
 ## 2. Architecture
 
+![AWS High Availability Architecture](Screenshots/AWS-High-Availability-Architecture.png)
+
 **AWS Region:** `eu-north-1` (Stockholm)
 
 **VPC CIDR:** `10.0.0.0/16`
