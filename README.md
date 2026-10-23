@@ -330,9 +330,9 @@ Potential improvements include:
 ### AWS VPC and Networking
 ![VPC Resource Map](Screenshots/01-vpc-resource-map.png)
 
-![Subnets](Screenshots/02-subnets-ss.png)
+![Subnets](Screenshots/02-subnets.png)
 
-![Route Tables](Screenshots/03-route-tables-ss.png)
+![Route Tables](Screenshots/03-route-tables.png)
 
 ### Network Load Balancer
 ![NLB Healthy Targets](Screenshots/04-nlb-healthy-targets.png)
