@@ -30,49 +30,49 @@ Two PostgreSQL database servers are deployed in private subnets, with database c
 
 **VPC CIDR:** `10.0.0.0/16`
 
+
 ```mermaid
 flowchart TB
-    U[Internet Users] --> NLB[Network Load Balancer]
-    NLB --> TG[Target Group - TCP 8002]
+    User["Internet Users"] --> NLB["Network Load Balancer - TCP 80"]
+    Admin["Administrator"] --> Bastion["Bastion Host - SSH"]
 
-    subgraph VPC[AWS VPC - 10.0.0.0/16]
-        subgraph AZ1[Availability Zone 1a]
-            APP1[Application EC2]
-            BASTION[Bastion Host]
-            DB1[(PostgreSQL DB 1)]
+    subgraph VPC["AWS VPC - 10.0.0.0/16"]
+        NLB
+
+        subgraph AZ1["eu-north-1a"]
+            App1["App EC2 - Public Subnet"]
+            DB1[("PostgreSQL DB 1 - Private Subnet")]
+            NAT["NAT Gateway"]
+            Bastion
         end
 
-        subgraph AZ2[Availability Zone 1b]
-            APP2[Application EC2]
-            DB2[(PostgreSQL DB 2)]
+        subgraph AZ2["eu-north-1b"]
+            App2["App EC2 - Public Subnet"]
+            DB2[("PostgreSQL DB 2 - Private Subnet")]
         end
 
-        ASG[EC2 Auto Scaling Group]
-        NAT[NAT Gateway]
+        ASG["EC2 Auto Scaling - Min 2, Max 4"]
+
+        NLB --> App1
+        NLB --> App2
+        ASG -.-> App1
+        ASG -.-> App2
+
+        App1 -. "Verified SQL Connectivity" .-> DB1
+        App1 -. "Verified SQL Connectivity" .-> DB2
+        App2 -. "Verified SQL Connectivity" .-> DB1
+        App2 -. "Verified SQL Connectivity" .-> DB2
+
+        Bastion -. SSH .-> App1
+        Bastion -. SSH .-> App2
+        Bastion -. SSH .-> DB1
+        Bastion -. SSH .-> DB2
     end
 
-    TG --> APP1
-    TG --> APP2
-    ASG -. Manages .-> APP1
-    ASG -. Manages .-> APP2
-
-    APP1 -. Verified SQL Access .-> DB1
-    APP1 -. Verified SQL Access .-> DB2
-    APP2 -. Verified SQL Access .-> DB1
-    APP2 -. Verified SQL Access .-> DB2
-
-    ADMIN[Administrator] --> BASTION
-    BASTION -. SSH .-> APP1
-    BASTION -. SSH .-> APP2
-    BASTION -. SSH .-> DB1
-    BASTION -. SSH .-> DB2
-
-    DB1 -. Outbound Internet .-> NAT
-    DB2 -. Outbound Internet .-> NAT
-
-    CW[Amazon CloudWatch] -. Monitors .-> ASG
-    CW -. Monitors .-> NLB
+    CW["Amazon CloudWatch"] -. Monitoring .-> ASG
+    CW -. Monitoring .-> NLB
 ```
+
 
 *Database connections represent verified connectivity using the PostgreSQL client. The Python web application itself has not been integrated with PostgreSQL.*
 
