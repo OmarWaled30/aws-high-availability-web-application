@@ -302,17 +302,26 @@ Potential improvements include:
 
 ## 13. Project Screenshots
 
-The repository's `screenshots/` directory can contain evidence of:
+### AWS VPC and Networking
+![VPC Resource Map](Screenshots/01-vpc-resource-map.png)
 
-- VPC resource map and subnet configuration.
-- Public and private route tables.
-- Network Load Balancer with healthy targets.
-- Auto Scaling configuration and activity history.
-- CloudWatch monitoring dashboard.
-- CPU-driven scale-out and scale-in.
-- PostgreSQL authentication and SQL query results.
+![Subnets](Screenshots/02-subnets.png)
 
-Screenshots should be reviewed to remove sensitive information before publication.
+![Route Tables](Screenshots/03-route-tables.png)
+
+### Network Load Balancer
+![NLB Healthy Targets](Screenshots/04-nlb-healthy-targets.png)
+
+### EC2 Auto Scaling
+![Auto Scaling Group](Screenshots/05-auto-scaling-group.png)
+
+![CPU-Based Scale-Out](Screenshots/06-auto-scaling-scale-out.png)
+
+![Automatic Scale-In](Screenshots/07-auto-scaling-scale-in.png)
+
+### Amazon CloudWatch Monitoring
+![CloudWatch Dashboard](Screenshots/08-cloudwatch-dashboard.png)
+
 
 ## 14. Key Learning Outcomes
 
